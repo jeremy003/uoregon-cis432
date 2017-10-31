@@ -17,17 +17,9 @@ int main(int argc, char** argv) {
   char* say_message = (char*) malloc(sizeof(char) * SAY_MAX);
   char buffer[MAX_BUF];
 
-
-  if (raw_mode) {
-  	  printf("Raw mode successful\n");
-  } else {
-	  printf("Raw mode unsuccessful\n");
-  }
-
   // Check for correct number of arguments
   if (argc != 4) {
 	  printf("Usage: ./client <hostname> <port number> <username>\n");
-	  cooked_mode;
 	  exit(-1);
   }
 
@@ -35,7 +27,6 @@ int main(int argc, char** argv) {
   char* username = strdup(argv[3]);
   if (strlen(username) > USERNAME_MAX) {
 	  printf("Username too long\n");
-	  cooked_mode;
 	  exit(-1);
   }
 
@@ -100,7 +91,7 @@ int main(int argc, char** argv) {
   while (quit != 1) {
     // Check for input from user
     printf(">");
-    scanf("%s", &input);
+    scanf("%s", input);
 
     // Check for command signal
     if (input[0] == '/') {
@@ -116,6 +107,7 @@ int main(int argc, char** argv) {
       }
       memcpy(user_command, &input[1], size);
       user_command[size] = '\0';
+      printf("%s\n", input);
     }
 
 
