@@ -38,8 +38,8 @@ int main(int argc, char** argv) {
 	  cooked_mode;
 	  exit(-1);
   }
-  
-  char* ptr;  
+
+  char* ptr;
   char* hostname = strdup(argv[1]);
   int port = strtol(argv[2], &ptr, 10);
 
@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
 	  fprintf(stderr, "Error: Failed to create listening socket.\n");
 	  exit(EXIT_FAILURE);
   }
-  
+
   // Create socket and connect to server
   struct sockaddr_in servaddr;
   memset(&servaddr, 0, sizeof(servaddr));
@@ -82,6 +82,12 @@ int main(int argc, char** argv) {
 
   send(c_socket, (void*) &join, sizeof(join), 0);
   int byte_count;
+  int i;
+  int len;
+  int size;
+  char input[SAY_MAX];
+  char user_command[SAY_MAX];
+
   // Create generic message to cast from buffer
   struct text* message;
   // Specific packets received from server once the text type has been decifered
@@ -92,38 +98,68 @@ int main(int argc, char** argv) {
 
   // Alternate between prompting user for input and trying to receive packets from server
   while (quit != 1) {
+    // Check for input from user
+    printf(">");
+    scanf("%s", &input);
+
+    // Check for command signal
+    if (input[0] == '/') {
+      // Count characters after '/'
+      len = strlen(input);
+      size = 0;
+      for (i = 1; i < len; i++) {
+        if (input[i] != ' ') {
+          size++;
+        } else {
+          break;
+        }
+      }
+      memcpy(user_command, &input[1], size);
+      user_command[size] = '\0';
+    }
+
+
+
 	  // Receive packet from server
 	  byte_count = recv(c_socket, &buffer, sizeof(buffer), 0);
 	  message = (struct text*) &buffer;
 	  printf("packet received: %d\n", message->txt_type);
-	  
+
 	  // Decode packet based on txt_type
 	  switch(message->txt_type) {
 		  case TXT_SAY:
 			  say = (struct text_say*) &buffer;
 			  //memcpy(&say, buffer, sizeof(say));
 			  printf("[%s][%s] %s\n", say->txt_channel, say->txt_username, say->txt_text);
-			 
+
 
 			  break;
 
 		  case TXT_LIST:
-			  
+        list = (struct text_list*) &buffer;
+        printf("Existing channels:\n");
+
+        // Iterate through the channels and list each one
+        len = list->txt_nchannels;
+        for (i = 0; i < len; i++) {
+          printf("\t%s", list->txt_channels[i].ch_channel);
+        }
+
 			  break;
-		
+
 		  case TXT_WHO:
 			  break;
 
 		  default:
 			  printf("unknown packet\n");
 			  break;
-		
+
 	  }
 
 
 
   }
-  
+
 
   return 0;
 }
