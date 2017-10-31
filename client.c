@@ -14,7 +14,6 @@
 int main(int argc, char** argv) {
   int quit = 0;
   char* active_channel = (char*) malloc(sizeof(char) * CHANNEL_MAX);
-  char* say_message = (char*) malloc(sizeof(char) * SAY_MAX);
   char buffer[MAX_BUF];
 
   // Check for correct number of arguments
@@ -59,19 +58,33 @@ int main(int argc, char** argv) {
   }
 
   // Send a login request to the server
-  struct request_login login;
-  login.req_type = REQ_LOGIN;
-  strcpy(login.req_username, username);
+  struct request_login request_login;
+  request_login.req_type = REQ_LOGIN;
+  strcpy(request_login.req_username, username);
 
-  send(c_socket, (void*) &login, sizeof(login), 0);
+  send(c_socket, (void*) &request_login, sizeof(request_login), 0);
 
   // Join common channel by default
   active_channel = "Common";
-  struct request_join join;
-  join.req_type = REQ_JOIN;
-  strcpy(join.req_channel, active_channel);
 
-  send(c_socket, (void*) &join, sizeof(join), 0);
+  // Packets to send to server
+  struct request_logout request_logout;
+  request_logout.req_type = REQ_LOGOUT;
+  struct request_join request_join;
+  request_join.req_type = REQ_JOIN;
+  struct request_leave request_leave;
+  request_leave.req_type = REQ_LEAVE;
+  struct request_say request_say;
+  request_say.req_type = REQ_SAY;
+  struct request_list request_list;
+  request_list.req_type = REQ_LIST;
+  struct request_who request_who;
+  request_who.req_type = REQ_WHO;
+
+  strcpy(request_join.req_channel, active_channel);
+
+  send(c_socket, (void*) &request_join, sizeof(request_join), 0);
+
   int byte_count;
   int i;
   int len;
@@ -107,7 +120,26 @@ int main(int argc, char** argv) {
       }
       memcpy(user_command, &input[1], size);
       user_command[size] = '\0';
-      printf("%s\n", input);
+
+      if (strcmp(user_command, "exit")) {
+        // Send logout request and exit the program
+      } else if (strcmp(user_command, "join")) {
+        // Send join request for channel
+      } else if (strcmp(user_command, "leave")) {
+        // Send request to leave channel
+      } else if (strcmp(user_command, "list")) {
+        // Send request for a list of channels
+      } else if (strcmp(user_command, "who")) {
+        // Send request for users on channel
+      } else if (strcmp(user_command, "switch")) {
+        // Send request to switch channels
+      }
+
+    } else {
+      // No '/' char so send a message
+      strcpy(request_say.req_channel, active_channel);
+      strcpy(request_say.req_text, input);
+      send(c_socket, (void*) &request_say, sizeof(request_say), 0);
     }
 
 
@@ -118,7 +150,7 @@ int main(int argc, char** argv) {
 	  printf("packet received: %d\n", message->txt_type);
 
 	  // Decode packet based on txt_type
-	  switch(message->txt_type) {
+	  switch (message->txt_type) {
 		  case TXT_SAY:
 			  say = (struct text_say*) &buffer;
 			  //memcpy(&say, buffer, sizeof(say));
