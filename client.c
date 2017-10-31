@@ -136,10 +136,12 @@ int main(int argc, char** argv) {
       }
 
     } else {
+      printf("constructing say message...");
       // No '/' char so send a message
       strcpy(request_say.req_channel, active_channel);
       strcpy(request_say.req_text, input);
-      send(c_socket, (void*) &request_say, sizeof(request_say), 0);
+      byte_count = send(c_socket, (void*) &request_say, sizeof(request_say), 0);
+      printf("%d\n", byte_count);
     }
 
 
