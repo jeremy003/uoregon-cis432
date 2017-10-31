@@ -6,6 +6,10 @@
 #include <arpa/inet.h>        	/*  inet (3) funtions         	*/
 #include <unistd.h>           	/*  misc. UNIX functions      	*/
 
+#include <string>
+
+using namespace std;
+
 #include "raw.h"
 #include "duckchat.h"
 
@@ -13,7 +17,8 @@
 
 int main(int argc, char** argv) {
   int quit = 0;
-  char* active_channel = (char*) malloc(sizeof(char) * CHANNEL_MAX);
+  // char* active_channel = (char*) malloc(sizeof(char) * CHANNEL_MAX);
+  string active_channel;
   char buffer[MAX_BUF];
 
   // Check for correct number of arguments
@@ -81,7 +86,7 @@ int main(int argc, char** argv) {
   struct request_who request_who;
   request_who.req_type = REQ_WHO;
 
-  strcpy(request_join.req_channel, active_channel);
+  strcpy(request_join.req_channel, active_channel.c_str());
 
   send(c_socket, (void*) &request_join, sizeof(request_join), 0);
 
@@ -123,6 +128,8 @@ int main(int argc, char** argv) {
 
       if (strcmp(user_command, "exit")) {
         // Send logout request and exit the program
+        send(c_socket, (void*) &request_logout, sizeof(request_logout), 0);
+        exit(0);
       } else if (strcmp(user_command, "join")) {
         // Send join request for channel
       } else if (strcmp(user_command, "leave")) {
@@ -136,11 +143,10 @@ int main(int argc, char** argv) {
       }
 
     } else {
-      printf("constructing say message...");
       // No '/' char so send a message
-      strcpy(request_say.req_channel, active_channel);
+      strcpy(request_say.req_channel, active_channel.c_str());
       strcpy(request_say.req_text, input);
-      byte_count = send(c_socket, (void*) &request_say, sizeof(request_say), 0);
+      send(c_socket, (void*) &request_say, sizeof(request_say), 0);
       printf("%d\n", byte_count);
     }
 
