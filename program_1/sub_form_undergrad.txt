@@ -1,0 +1,96 @@
+CIS 432 � Introduction to Computer Networks
+Programming Assignment 01 � Undergraduate Students
+
+
+Please fill this form and send it together with your program.
+Put all the source files, makefile and this text file into a folder by the lastname of one of the group members (all lowercase letters),
+compress it into a tarball, gz or zip and send using TurnIN Homework page.
+(https://systems.cs.uoregon.edu/apps/turnin.php)
+Please include any special instructions for compiling and running your program on ix.
+
+Student Names: Jeremy
+Student IDs: 951500751
+
+Answer the questions by selecting one of the given options. You may add additional information if you wish to.
+
+
+Client Program
+--------------
+
+- Does the client compile and run? yes/no
+yes
+
+- Do login and logout work? yes/no
+yes
+
+- Does the client accept user commands? yes/no
+yes
+
+Please specify which of the following features work
+
+    - Join: works/doesn't work
+    works
+
+    - Leave: works/doesn't work
+    works
+
+    - Say: works/doesn't work
+    works
+
+    - Switch: works/doesn't work
+    works
+
+    - List: works/doesn't work
+    works
+
+    - Who: works/doesn't work
+    works
+
+
+- Does the client send Keep Alive message when needed (for extra credit)? yes/no
+no
+
+- Does the client send Keep Alive message when not needed (for extra credit)? yes/no
+no
+
+- Can the client handle messages that are out of order(e.g. /leave before a /join)? yes/no
+no
+
+- Can the client redisplay the prompt and user input when a message from the server is received while the user is typing (for extra credit)? yes/no
+no
+
+
+Server Program
+-------------
+
+- Does the server compile and run? yes/no
+yes
+
+- Does the server accept client requests? yes/no
+yes
+
+- Do Login and Logout work? yes/no
+yes
+
+Please specify which of the following features work
+
+    - Join: works/doesn't work
+    works
+
+    - Leave: works/doesn't work
+    doesn't work. the channel vector seems to be erasing the specified client, but they're still receiving messages from the channel.
+
+    - Say: works/doesn't work
+    works
+
+    - List: works/doesn't work
+    doesn't work. I couldn't figure out how to set the nested static array of size 0.
+
+    - Who: works/doesn't work
+    doesn't work. same issue as List.
+
+- Does the server timeout users correctly (for extra credit)? yes/no
+no
+
+- Can the server handle messages that are out of order(e.g. /say before a client has logged in)? yes/no
+no
