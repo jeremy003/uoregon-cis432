@@ -17,7 +17,7 @@
 #include <fstream>
 #include <time.h>
 #include <signal.h>
-
+#include <algorithm>
 
 using namespace std;
 
@@ -81,7 +81,7 @@ void check_subscription_states();
 void remove_server_from_channels(string key);
 
 
-int timer_delay = 10; // 1 minute delay
+int timer_delay = 60; // 1 minute delay
 int timer_flag;
 int is_second_timer;
 void on_alarm(int signum);
@@ -1157,7 +1157,7 @@ void handle_ss_say_message(void *data, struct sockaddr_in sock)
 	string username = msg->req_username;
 	string text = msg->req_text;
 
-	unsigned long long uid = msg->req_uid;
+	unsigned long long uid = (unsigned long long int) msg->req_uid;
 
 	// check if unique id of say has been received before
 	if (find(received_uids.begin(), received_uids.end(), uid) == received_uids.end()) {
