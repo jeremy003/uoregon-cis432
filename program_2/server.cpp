@@ -420,7 +420,6 @@ void handle_logout_message(struct sockaddr_in sock)
 
 void handle_join_message(void *data, struct sockaddr_in sock)
 {
-	cout << "handling join" << endl;
 	//get message fields
 	struct request_join* msg;
 	msg = (struct request_join*)data;
@@ -458,7 +457,6 @@ void handle_join_message(void *data, struct sockaddr_in sock)
 
 		if (channel_iter == channels.end())
 		{
-			cout << "creating channel " << channel << endl;
 			//channel not found
 			map<string,struct sockaddr_in> new_channel_users;
 			new_channel_users[username] = sock;
@@ -728,7 +726,7 @@ void handle_say_message(void *data, struct sockaddr_in sock)
 				map<string, struct sockaddr_in> servs = channels[channel].channel_servers;
 				map<string, struct sockaddr_in>::iterator server_iter;
 				for (server_iter = servs.begin(); server_iter != servs.end(); server_iter++) {
-					cout << "sending s2s to server " << server_iter->first << endl;
+					// cout << "sending s2s to server " << server_iter->first << endl;
 					ssize_t bytes;
 					void *send_data;
 					size_t len;
@@ -1371,7 +1369,7 @@ void handle_timer()
 
 void renew_subscriptions()
 {
-	cout << "renewing subscriptions..." << endl;
+	// cout << "renewing subscriptions..." << endl;
 	// create iterator for adjacent servers to send join to
 	map<string, struct sockaddr_in>::iterator server_iter;
 
@@ -1388,7 +1386,7 @@ void renew_subscriptions()
 
 void check_subscription_states()
 {
-	cout << "cancelling old subscriptions..." << endl;
+	// cout << "cancelling old subscriptions..." << endl;
 	// iterate through active servers map, if active state is 0 then remove from all channels
 	map<string, int>::iterator active_iter;
 	for (active_iter = active_servers.begin(); active_iter != active_servers.end(); active_iter++) {
@@ -1408,7 +1406,7 @@ void remove_server_from_channels(string key)
 	for (channels_iter = channels.begin(); channels_iter != channels.end(); channels_iter++) {
 		// check if the channel contains the server key
 		if (channels_iter->second.channel_servers.find(key) != channels_iter->second.channel_servers.end()) {
-			cout << "removing " << key << " from channel " << channels_iter->first << endl;
+			// cout << "removing " << key << " from channel " << channels_iter->first << endl;
 			server_leave_channel(key, channels_iter->first);
 		}
 	}
