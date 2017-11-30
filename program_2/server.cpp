@@ -727,6 +727,7 @@ void handle_say_message(void *data, struct sockaddr_in sock)
 				map<string, struct sockaddr_in> servs = channels[channel].channel_servers;
 				map<string, struct sockaddr_in>::iterator server_iter;
 				for (server_iter = servs.begin(); server_iter != servs.end(); server_iter++) {
+					cout << "sending s2s to server " << server_iter->first << endl;
 					ssize_t bytes;
 					void *send_data;
 					size_t len;
