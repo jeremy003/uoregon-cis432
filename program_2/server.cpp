@@ -172,9 +172,9 @@ int main(int argc, char *argv[])
 	//testing maps end
 
 	//create default channel Common
-	string default_channel = "Common";
-	map<string,struct sockaddr_in> default_channel_users;
-	channels[default_channel].channel_users = default_channel_users;
+	// string default_channel = "Common";
+	// map<string,struct sockaddr_in> default_channel_users;
+	// channels[default_channel].channel_users = default_channel_users;
 
 	// start timer to go off every minute
 	struct sigaction act;
@@ -567,7 +567,8 @@ void handle_leave_message(void *data, struct sockaddr_in sock)
 				cout << server_identifier << " " << key << " recv Request Leave " << channel << endl;
 
 				//delete channel if no more users
-				if (channels[channel].channel_users.empty() && (channel != "Common"))
+				// if (channels[channel].channel_users.empty() && (channel != "Common"))
+				if (channels[channel].channel_users.empty())
 				{
 					channels.erase(channel_iter);
 				}
