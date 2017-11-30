@@ -31,6 +31,11 @@ typedef int text_t;
 #define REQ_WHO 6
 #define REQ_KEEP_ALIVE 7 /* Only needed by graduate students */
 
+/* messages sent from server to server */
+#define REQ_SS_JOIN 8
+#define REQ_SS_LEAVE 9
+#define REQ_SS_SAY 10
+
 /* Define codes for text types.  These are the messages sent to the client. */
 #define TXT_SAY 0
 #define TXT_LIST 1
@@ -57,17 +62,17 @@ struct request_logout {
 
 struct request_join {
         request_t req_type; /* = REQ_JOIN */
-        char req_channel[CHANNEL_MAX]; 
+        char req_channel[CHANNEL_MAX];
 } packed;
 
 struct request_leave {
         request_t req_type; /* = REQ_LEAVE */
-        char req_channel[CHANNEL_MAX]; 
+        char req_channel[CHANNEL_MAX];
 } packed;
 
 struct request_say {
         request_t req_type; /* = REQ_SAY */
-        char req_channel[CHANNEL_MAX]; 
+        char req_channel[CHANNEL_MAX];
         char req_text[SAY_MAX];
 } packed;
 
@@ -77,11 +82,30 @@ struct request_list {
 
 struct request_who {
         request_t req_type; /* = REQ_WHO */
-        char req_channel[CHANNEL_MAX]; 
+        char req_channel[CHANNEL_MAX];
 } packed;
 
 struct request_keep_alive {
         request_t req_type; /* = REQ_KEEP_ALIVE */
+} packed;
+
+/* Server-to-Server requests */
+struct request_ss_join {
+        request_t req_type; /* = REQ_SS_JOIN */
+        char req_channel[CHANNEL_MAX];
+} packed;
+
+struct request_ss_leave {
+        request_t req_type; /* = REQ_SS_LEAVE */
+        char req_channel[CHANNEL_MAX];
+} packed;
+
+struct request_ss_say {
+        request_t req_type; /* = REQ_SAY */
+        unsigned long long req_uid;
+        char req_username[USERNAME_MAX];
+        char req_channel[CHANNEL_MAX];
+        char req_text[SAY_MAX];
 } packed;
 
 /* This structure is used for a generic text type, to the client. */

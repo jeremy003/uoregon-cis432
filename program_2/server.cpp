@@ -12,8 +12,11 @@
 #include <fcntl.h>
 #include <string>
 #include <map>
+#include <vector>
 #include <iostream>
+#include <fstream>
 #include <time.h>
+#include <signal.h>
 
 
 using namespace std;
@@ -28,20 +31,28 @@ using namespace std;
 #define HOSTNAME_MAX 100
 #define MAX_MESSAGE_LEN 65536
 
-//typedef map<string,string> channel_type; //<username, ip+port in string>
-typedef map<string,struct sockaddr_in> channel_type; //<username, sockaddr_in of user>
+struct channel_members {
+	map<string,struct sockaddr_in> channel_users; //<username, sockaddr_in of user>
+	map<string, struct sockaddr_in> channel_servers; //<server, sockaddr_in of server>
+};
+
+//typedef map<string,string> channel_users; //<username, ip+port in string>
+// map<string,struct sockaddr_in> channel_users; //<username, sockaddr_in of user>
+// map<string, struct sockaddr_in> channel_servers; //<server, sockaddr_in of server>
 
 int s; //socket for listening
 struct sockaddr_in server;
-
+string server_identifier;
 
 map<string,struct sockaddr_in> usernames; //<username, sockaddr_in of user>
+map<string,struct sockaddr_in> servers;		//<ip.port, sockaddr_in of server>
 map<string,int> active_usernames; //0-inactive , 1-active
 //map<struct sockaddr_in,string> rev_usernames;
 map<string,string> rev_usernames; //<ip+port in string, username>
-map<string,channel_type> channels;
+map<string,struct channel_members> channels;
+map<string,int> active_servers; //<ip.port, 0-inactive 1-active>
 
-
+vector<unsigned long long> received_uids;
 
 
 void handle_socket_input();
@@ -55,25 +66,44 @@ void handle_who_message(void *data, struct sockaddr_in sock);
 void handle_keep_alive_message(struct sockaddr_in sock);
 void send_error_message(struct sockaddr_in sock, string error_msg);
 
+// server-to-server messages
+void handle_ss_join_message(void *data, struct sockaddr_in sock);
+void handle_ss_leave_message(void *data, struct sockaddr_in sock);
+void handle_ss_say_message(void *data, struct sockaddr_in sock);
+
+void send_ss_join(string send_id, struct sockaddr_in sock, string channel);
+void server_leave_channel(string key, string channel);
+
+// soft-state functions
+void handle_timer();
+void renew_subscriptions();
+void check_subscription_states();
+void remove_server_from_channels(string key);
+
+
+int timer_delay = 10; // 1 minute delay
+int timer_flag;
+int is_second_timer;
+void on_alarm(int signum);
 
 
 int main(int argc, char *argv[])
 {
-	
-	if (argc != 3)
+
+	if (((argc + 1) % 2) != 0 || argc < 3) // should be odd number of arguments > 3
 	{
-		printf("Usage: ./server domain_name port_num\n");
+		printf("Usage: ./server domain_name port_num adj_domain1 adj_port1 adj_domain2 adj_port2 ...\n");
 		exit(1);
 	}
 
 	char hostname[HOSTNAME_MAX];
 	int port;
-	
+
 	strcpy(hostname, argv[1]);
 	port = atoi(argv[2]);
-	
 
-	
+
+
 	s = socket(PF_INET, SOCK_DGRAM, 0);
 	if (s < 0)
 	{
@@ -94,6 +124,34 @@ int main(int argc, char *argv[])
 	}
 	memcpy(&server.sin_addr, he->h_addr_list[0], he->h_length);
 
+	string ip(inet_ntoa(server.sin_addr));
+	server_identifier = ip + "." + to_string(server.sin_port);
+
+	string server_id;
+	struct sockaddr_in temp;
+	// Set up tree for adjacent servers
+	for (int i = 3; i < argc; i+=2) {
+		strcpy(hostname, argv[i]);
+		port = atoi(argv[i+1]);
+
+		if ((he = gethostbyname(hostname)) == NULL) {
+			puts("error resolving hostname..");
+			exit(1);
+		}
+
+		temp.sin_family = AF_INET;
+		temp.sin_port = htons(port);
+
+		memcpy(&temp.sin_addr, he->h_addr_list[0], he->h_length);
+
+		ip = inet_ntoa(temp.sin_addr);
+		server_id = ip + "." + to_string(temp.sin_port);
+
+		servers[server_id] = temp;
+		active_servers[server_id] = 0;
+	}
+
+
 	int err;
 
 	err = bind(s, (struct sockaddr*)&server, sizeof server);
@@ -108,7 +166,7 @@ int main(int argc, char *argv[])
 	}
 
 
-	
+
 
 
 	//testing maps end
@@ -116,57 +174,37 @@ int main(int argc, char *argv[])
 	//create default channel Common
 	string default_channel = "Common";
 	map<string,struct sockaddr_in> default_channel_users;
-	channels[default_channel] = default_channel_users;
+	channels[default_channel].channel_users = default_channel_users;
 
+	// start timer to go off every minute
+	struct sigaction act;
+	struct itimerval timer;
 
-	
-	
+	memset (&act, 0, sizeof (act));
+	act.sa_handler = &on_alarm;
+	sigaction(SIGALRM, &act, NULL);
 
+	timer.it_value.tv_sec = timer_delay;
+	timer.it_value.tv_usec = 0;
+	timer.it_interval.tv_sec = timer_delay;
+	timer.it_interval.tv_usec = 0;
+
+	setitimer (ITIMER_REAL, &timer, NULL);
+	is_second_timer = 0;
+	timer_flag = 0;
 
 	while(1) //server runs for ever
 	{
 
-		//use a file descriptor with a timer to handle timeouts
-		int rc;
-		fd_set fds;
-
-		FD_ZERO(&fds);
-		FD_SET(s, &fds);
-		
-
-
-		rc = select(s+1, &fds, NULL, NULL, NULL);
-		
-
-		
-		if (rc < 0)
-		{
-			printf("error in select\n");
-            getchar();
-		}
-		else
-		{
-			int socket_data = 0;
-
-			if (FD_ISSET(s,&fds))
-			{
-               
-				//reading from socket
-				handle_socket_input();
-				socket_data = 1;
-
-			}
-
-			
-
-			
-
-			
-
-
+		// check for timer interval
+		if (timer_flag == 1) {
+			handle_timer();
+			timer_flag = 0;
 		}
 
-		
+		handle_socket_input();
+
+
 	}
 
 
@@ -194,7 +232,6 @@ void handle_socket_input()
 
 	if (bytes < 0)
 	{
-		perror ("recvfrom failed\n");
 	}
 	else
 	{
@@ -236,14 +273,24 @@ void handle_socket_input()
 		{
 			handle_who_message(data, recv_client);
 		}
-		
+		else if (message_type == REQ_SS_JOIN)
+		{
+			handle_ss_join_message(data, recv_client);
+		}
+		else if (message_type == REQ_SS_LEAVE)
+		{
+			handle_ss_leave_message(data, recv_client);
+		}
+		else if (message_type == REQ_SS_SAY)
+		{
+			handle_ss_say_message(data, recv_client);
+		}
+
 		else
 		{
 			//send error message to client
 			send_error_message(recv_client, "*Unknown command");
 		}
-
-
 
 
 	}
@@ -280,7 +327,7 @@ void handle_login_message(void *data, struct sockaddr_in sock)
 
 	cout << "server: " << username << " logs in" << endl;
 
-	
+
 
 
 
@@ -332,16 +379,16 @@ void handle_logout_message(struct sockaddr_in sock)
 		usernames.erase(user_iter);
 
 		//remove from all the channels if found
-		map<string,channel_type>::iterator channel_iter;
+		map<string,struct channel_members>::iterator channel_iter;
 		for(channel_iter = channels.begin(); channel_iter != channels.end(); channel_iter++)
 		{
 			//cout << "key: " << iter->first << " username: " << iter->second << endl;
-			//channel_type current_channel = channel_iter->second;
+			//channel_users current_channel = channel_iter->second;
 			map<string,struct sockaddr_in>::iterator within_channel_iterator;
-			within_channel_iterator = channel_iter->second.find(username);
-			if (within_channel_iterator != channel_iter->second.end())
+			within_channel_iterator = channel_iter->second.channel_users.find(username);
+			if (within_channel_iterator != channel_iter->second.channel_users.end())
 			{
-				channel_iter->second.erase(within_channel_iterator);
+				channel_iter->second.channel_users.erase(within_channel_iterator);
 			}
 
 		}
@@ -373,6 +420,7 @@ void handle_logout_message(struct sockaddr_in sock)
 
 void handle_join_message(void *data, struct sockaddr_in sock)
 {
+	cout << "handling join" << endl;
 	//get message fields
 	struct request_join* msg;
 	msg = (struct request_join*)data;
@@ -402,7 +450,7 @@ void handle_join_message(void *data, struct sockaddr_in sock)
 	{
 		string username = rev_usernames[key];
 
-		map<string,channel_type>::iterator channel_iter;
+		map<string,struct channel_members>::iterator channel_iter;
 
 		channel_iter = channels.find(channel);
 
@@ -410,27 +458,28 @@ void handle_join_message(void *data, struct sockaddr_in sock)
 
 		if (channel_iter == channels.end())
 		{
+			cout << "creating channel " << channel << endl;
 			//channel not found
 			map<string,struct sockaddr_in> new_channel_users;
 			new_channel_users[username] = sock;
-			channels[channel] = new_channel_users;
+			channels[channel].channel_users = new_channel_users;
 			//cout << "creating new channel and joining" << endl;
-
+			//broadcast to adjacent servers
+			for (map<string,struct sockaddr_in>::iterator iter = servers.begin(); iter != servers.end(); iter++) {
+				struct sockaddr_in send_sock = iter->second;
+				send_ss_join(iter->first, send_sock, channel);
+			}
 		}
 		else
 		{
 			//channel already exits
-			//map<string,struct sockaddr_in>* existing_channel_users;
-			//existing_channel_users = &channels[channel];
-			//*existing_channel_users[username] = sock;
 
-			channels[channel][username] = sock;
+			channels[channel].channel_users[username] = sock;
 			//cout << "joining exisitng channel" << endl;
-
 
 		}
 
-		cout << "server: " << username << " joins channel " << channel << endl;
+		cout << server_identifier << " " << key << " recv Request Join " << channel << endl;
 
 
 	}
@@ -468,7 +517,6 @@ void handle_leave_message(void *data, struct sockaddr_in sock)
  	sprintf(port_str, "%d", port);
 	string key = ip + "." +port_str;
 
-
 	//check whether key is in rev_usernames
 	map <string,string> :: iterator iter;
 
@@ -483,7 +531,7 @@ void handle_leave_message(void *data, struct sockaddr_in sock)
 	{
 		string username = rev_usernames[key];
 
-		map<string,channel_type>::iterator channel_iter;
+		map<string,struct channel_members>::iterator channel_iter;
 
 		channel_iter = channels.find(channel);
 
@@ -502,9 +550,9 @@ void handle_leave_message(void *data, struct sockaddr_in sock)
 			//map<string,struct sockaddr_in> existing_channel_users;
 			//existing_channel_users = channels[channel];
 			map<string,struct sockaddr_in>::iterator channel_user_iter;
-			channel_user_iter = channels[channel].find(username);
+			channel_user_iter = channels[channel].channel_users.find(username);
 
-			if (channel_user_iter == channels[channel].end())
+			if (channel_user_iter == channels[channel].channel_users.end())
 			{
 				//user not in channel
 				send_error_message(sock, "You are not in channel " + channel);
@@ -512,15 +560,16 @@ void handle_leave_message(void *data, struct sockaddr_in sock)
 			}
 			else
 			{
-				channels[channel].erase(channel_user_iter);
+				channels[channel].channel_users.erase(channel_user_iter);
 				//existing_channel_users.erase(channel_user_iter);
-				cout << "server: " << username << " leaves channel " << channel <<endl;
+				// cout << "server: " << username << " leaves channel " << channel <<endl;
+
+				cout << server_identifier << " " << key << " recv Request Leave " << channel << endl;
 
 				//delete channel if no more users
-				if (channels[channel].empty() && (channel != "Common"))
+				if (channels[channel].channel_users.empty() && (channel != "Common"))
 				{
 					channels.erase(channel_iter);
-					cout << "server: " << "removing empty channel " << channel <<endl;
 				}
 
 			}
@@ -581,7 +630,7 @@ void handle_say_message(void *data, struct sockaddr_in sock)
 	{
 		string username = rev_usernames[key];
 
-		map<string,channel_type>::iterator channel_iter;
+		map<string,struct channel_members>::iterator channel_iter;
 
 		channel_iter = channels.find(channel);
 
@@ -600,9 +649,9 @@ void handle_say_message(void *data, struct sockaddr_in sock)
 			//map<string,struct sockaddr_in> existing_channel_users;
 			//existing_channel_users = channels[channel];
 			map<string,struct sockaddr_in>::iterator channel_user_iter;
-			channel_user_iter = channels[channel].find(username);
+			channel_user_iter = channels[channel].channel_users.find(username);
 
-			if (channel_user_iter == channels[channel].end())
+			if (channel_user_iter == channels[channel].channel_users.end())
 			{
 				//user not in channel
 				send_error_message(sock, "You are not in channel " + channel);
@@ -611,7 +660,7 @@ void handle_say_message(void *data, struct sockaddr_in sock)
 			else
 			{
 				map<string,struct sockaddr_in> existing_channel_users;
-				existing_channel_users = channels[channel];
+				existing_channel_users = channels[channel].channel_users;
 				for(channel_user_iter = existing_channel_users.begin(); channel_user_iter != existing_channel_users.end(); channel_user_iter++)
 				{
 					//cout << "key: " << iter->first << " username: " << iter->second << endl;
@@ -653,8 +702,62 @@ void handle_say_message(void *data, struct sockaddr_in sock)
 					}
 
 				}
-				cout << "server: " << username << " sends say message in " << channel <<endl;
 
+				// cout << "server: " << username << " sends say message in " << channel <<endl;
+				cout << server_identifier << " " << key << " recv Request Say " << channel << " \"" << text << "\"" << endl;
+
+				// generate uid for say message
+				unsigned long long uid = 0;
+				size_t size = sizeof(uid);
+				ifstream urandom("/dev/urandom", ios::in|ios::binary);
+				if(urandom) {
+					urandom.read(reinterpret_cast<char*>(&uid), size);
+					if(!urandom) {
+						cout << "failed to read random value from /dev/urandom" << endl;
+					}
+					urandom.close();
+				} else {
+					cout << "failed to open /dev/urandom for reading" << endl;
+				}
+
+				received_uids.push_back(uid);
+
+				// send S2S say message to adjacent servers subscribed to the channel
+
+				map<string, struct sockaddr_in> servs = channels[channel].channel_servers;
+				map<string, struct sockaddr_in>::iterator server_iter;
+				for (server_iter = servs.begin(); server_iter != servs.end(); server_iter++) {
+					ssize_t bytes;
+					void *send_data;
+					size_t len;
+
+					struct request_ss_say send_msg;
+					send_msg.req_type = REQ_SS_SAY;
+
+					const char* str = channel.c_str();
+					strcpy(send_msg.req_channel, str);
+					str = username.c_str();
+					strcpy(send_msg.req_username, str);
+					str = text.c_str();
+					strcpy(send_msg.req_text, str);
+					send_msg.req_uid = uid;
+
+					send_data = &send_msg;
+
+					len = sizeof send_msg;
+
+					//cout << username <<endl;
+					struct sockaddr_in send_sock = server_iter->second;
+
+
+					//bytes = sendto(s, send_data, len, 0, (struct sockaddr*)&send_sock, fromlen);
+					bytes = sendto(s, send_data, len, 0, (struct sockaddr*)&send_sock, sizeof send_sock);
+
+					if (bytes < 0)
+					{
+						perror("Message failed\n"); //error
+					}
+				}
 			}
 
 
@@ -720,7 +823,7 @@ void handle_list_message(struct sockaddr_in sock)
 		send_msg->txt_nchannels = size;
 
 
-		map<string,channel_type>::iterator channel_iter;
+		map<string,struct channel_members>::iterator channel_iter;
 
 
 
@@ -817,7 +920,7 @@ void handle_who_message(void *data, struct sockaddr_in sock)
 
 		active_usernames[username] = 1;
 
-		map<string,channel_type>::iterator channel_iter;
+		map<string,struct channel_members>::iterator channel_iter;
 
 		channel_iter = channels.find(channel);
 
@@ -832,7 +935,7 @@ void handle_who_message(void *data, struct sockaddr_in sock)
 		{
 			//channel exits
 			map<string,struct sockaddr_in> existing_channel_users;
-			existing_channel_users = channels[channel];
+			existing_channel_users = channels[channel].channel_users;
 			int size = existing_channel_users.size();
 
 			ssize_t bytes;
@@ -951,8 +1054,360 @@ void send_error_message(struct sockaddr_in sock, string error_msg)
 
 }
 
+// Server to server messages
+
+void handle_ss_join_message(void *data, struct sockaddr_in sock)
+{
+	struct request_ss_join* msg;
+	msg = (struct request_ss_join*)data;
+
+	string channel = msg->req_channel;
+
+	string ip = inet_ntoa(sock.sin_addr);
+	int port = sock.sin_port;
+
+	string key = ip + "." + to_string(port);
+	cout << server_identifier << " " << key << " recv S2S Join " << channel << endl;
+	active_servers[key] = 1;
+
+	// add sender server to list of servers for channel
+	map<string, struct channel_members>::iterator channel_iter;
+
+	channel_iter = channels.find(channel);
+
+	if (channel_iter == channels.end()) {
+		// channel not found
+		map<string, struct sockaddr_in> new_channel_servers;
+		new_channel_servers[key] = sock;
+		channels[channel].channel_servers = new_channel_servers;
+
+		//broadcast to adjacent servers
+		for (map<string,struct sockaddr_in>::iterator iter = servers.begin(); iter != servers.end(); iter++) {
+			struct sockaddr_in send_sock = iter->second;
+			send_ss_join(iter->first, send_sock, channel);
+		}
+	} else {
+		// channel exists, add server to list of channel servers
+		channels[channel].channel_servers[key] = sock;
+	}
+
+	// Check if this server is subscribed to channel
+	// if (find(subscribed_channels.begin(), subscribed_channels.end(), channel) == subscribed_channels.end()) {
+	// 	// this server is not subscribed to the channel
+	// 	struct sockaddr_in send_sock;
+	// 	subscribed_channels.push_back(channel);
+  //
+	// 	// need to send s2s join to adjacent servers
+	// 	for (map<string,struct sockaddr_in>::iterator iter = servers.begin(); iter != servers.end(); iter++) {
+	// 		send_sock = iter->second;
+	// 		send_ss_join(iter->first, send_sock, channel);
+	// 	}
+	// }
+}
+
+void handle_ss_leave_message(void *data, struct sockaddr_in sock)
+{
+	struct request_ss_leave* msg;
+	msg = (struct request_ss_leave*)data;
+
+	string channel = msg->req_channel;
+
+	string ip = inet_ntoa(sock.sin_addr);
+
+	int port = sock.sin_port;
+
+	string key = ip + "." + to_string(port);
+
+	server_leave_channel(key, channel);
+	// cout << server_identifier << " " << key << " recv Request S2S Leave " << channel << endl;
+  //
+	// map<string,struct channel_members>::iterator channel_iter;
+	// channel_iter = channels.find(channel);
+  //
+	// if (channel_iter != channels.end()) {
+	// 	// iterator for map from server id to socket
+	// 	map<string, struct sockaddr_in>::iterator it = channel_iter->second.channel_servers.find(key);
+	// 	if (it != channel_iter->second.channel_servers.end()) {
+	// 		// server id was found in list of servers for channel
+	// 		channel_iter->second.channel_servers.erase(it);
+	// 	} else {
+	// 		cout << "server id not found in channel " << channel << endl;
+	// 	}
+	// } else {
+	// 	cout << "channel " << channel << " not found" << endl;
+	// }
+}
+
+void handle_ss_say_message(void *data, struct sockaddr_in sock)
+{
+	struct request_ss_say* msg;
+	msg = (struct request_ss_say*)data;
+
+	string ip = inet_ntoa(sock.sin_addr);
+
+	int port = sock.sin_port;
+
+ 	char port_str[6];
+ 	sprintf(port_str, "%d", port);
+	string key = ip + "." +port_str;
+
+	string channel = msg->req_channel;
+	string username = msg->req_username;
+	string text = msg->req_text;
+
+	unsigned long long uid = msg->req_uid;
+
+	// check if unique id of say has been received before
+	if (find(received_uids.begin(), received_uids.end(), uid) == received_uids.end()) {
+		// say message has not been seen before
+		// send to clients and servers subscribed to channel
+		received_uids.push_back(uid);
+
+		map<string,struct sockaddr_in>::iterator channel_user_iter;
+		map<string,struct sockaddr_in> existing_channel_users;
+		existing_channel_users = channels[channel].channel_users;
+
+		cout << server_identifier << " " << key << " recv Request S2S Say " << channel << " \"" << text << "\"" << endl;
+
+		// adjacent servers on the channel
+		map<string, struct sockaddr_in> servs = channels[channel].channel_servers;
+		map<string, struct sockaddr_in>::iterator server_iter;
+
+		// make sure this server has somewhere to forward the say message
+		// in other words, number of users on channel > 0 or number of servers on channel > 1
+		if (existing_channel_users.size() > 0 || servs.size() > 1) {
+			for(channel_user_iter = existing_channel_users.begin(); channel_user_iter != existing_channel_users.end(); channel_user_iter++)
+			{
+				//cout << "key: " << iter->first << " username: " << iter->second << endl;
+
+				ssize_t bytes;
+				void *send_data;
+				size_t len;
+
+				struct text_say send_msg;
+				send_msg.txt_type = TXT_SAY;
+
+				const char* str = channel.c_str();
+				strcpy(send_msg.txt_channel, str);
+				str = username.c_str();
+				strcpy(send_msg.txt_username, str);
+				str = text.c_str();
+				strcpy(send_msg.txt_text, str);
+				//send_msg.txt_username, *username.c_str();
+				//send_msg.txt_text,*text.c_str();
+				send_data = &send_msg;
+
+				len = sizeof send_msg;
+
+				//cout << username <<endl;
+				struct sockaddr_in send_sock = channel_user_iter->second;
 
 
+				//bytes = sendto(s, send_data, len, 0, (struct sockaddr*)&send_sock, fromlen);
+				bytes = sendto(s, send_data, len, 0, (struct sockaddr*)&send_sock, sizeof send_sock);
+
+				if (bytes < 0)
+				{
+					perror("Message failed\n"); //error
+				}
+				else
+				{
+					//printf("Message sent\n");
+
+				}
+
+			}
 
 
+			for (server_iter = servs.begin(); server_iter != servs.end(); server_iter++) {
+				// send s2s message to all adjacent servers except the one that sent it
+				if (server_iter->first != key) {
+					ssize_t bytes;
+					void *send_data;
+					size_t len;
 
+					struct request_ss_say send_msg;
+					send_msg.req_type = REQ_SS_SAY;
+
+					const char* str = channel.c_str();
+					strcpy(send_msg.req_channel, str);
+					str = username.c_str();
+					strcpy(send_msg.req_username, str);
+					str = text.c_str();
+					strcpy(send_msg.req_text, str);
+					send_msg.req_uid = uid;
+
+					send_data = &send_msg;
+
+					len = sizeof send_msg;
+
+					//cout << username <<endl;
+					struct sockaddr_in send_sock = server_iter->second;
+
+					string send_ip = inet_ntoa(send_sock.sin_addr);
+
+					int send_port = send_sock.sin_port;
+
+					string send_key = send_ip + "." + to_string(send_port);
+
+					cout << server_identifier << " " << send_key << " send S2S Say" << channel << " \"" << text << "\"" << endl;
+
+					//bytes = sendto(s, send_data, len, 0, (struct sockaddr*)&send_sock, fromlen);
+					bytes = sendto(s, send_data, len, 0, (struct sockaddr*)&send_sock, sizeof send_sock);
+
+					if (bytes < 0)
+					{
+						perror("Message failed\n"); //error
+					}
+				}
+			}
+		} else {
+			// nowhere to forward the say message so unsubscribe from the channel
+			channels.erase(channels.find(channel));
+
+			struct request_ss_leave send_msg;
+			send_msg.req_type = REQ_SS_LEAVE;
+			strcpy(send_msg.req_channel, channel.c_str());
+
+			ssize_t bytes;
+			void *send_data;
+			size_t len;
+
+			send_data = &send_msg;
+
+			len = sizeof send_msg;
+
+			cout << server_identifier << " " << key << " send S2S Leave " << channel << endl;
+
+			bytes = sendto(s, send_data, len, 0, (struct sockaddr*)&sock, sizeof sock);
+
+			if (bytes < 0)
+			{
+				perror("Message failed\n"); //error
+			}
+
+			// subscribed_channels.erase(std::remove(subscribed_channels.begin(), subscribed_channels.end(), channel), subscribed_channels.end());
+		}
+
+	} else {
+		// send ss_leave to sender to remove loop
+		struct request_ss_leave send_msg;
+		send_msg.req_type = REQ_SS_LEAVE;
+		strcpy(send_msg.req_channel, channel.c_str());
+
+		ssize_t bytes;
+		void *send_data;
+		size_t len;
+
+		send_data = &send_msg;
+
+		len = sizeof send_msg;
+
+		cout << server_identifier << " " << key << " send S2S Leave " << channel << endl;
+
+		bytes = sendto(s, send_data, len, 0, (struct sockaddr*)&sock, sizeof sock);
+
+		if (bytes < 0)
+		{
+			perror("Message failed\n"); //error
+		}
+	}
+
+}
+
+void send_ss_join(string send_id, struct sockaddr_in sock, string channel)
+{
+	struct request_ss_join send_msg;
+	send_msg.req_type = REQ_SS_JOIN;
+	const char* str = channel.c_str();
+	strcpy(send_msg.req_channel, str);
+	void *send_data = &send_msg;
+	size_t len = sizeof send_msg;
+	cout << server_identifier << " " << send_id << " send S2S Join " << channel << endl;
+	ssize_t bytes = sendto(s, send_data, len, 0, (struct sockaddr*)&sock, sizeof sock);
+	if (bytes < 0) {
+		cout << "failed to send join message to adjacent server" << endl;
+	}
+}
+
+void server_leave_channel(string key, string channel)
+{
+	cout << server_identifier << " " << key << " recv Request S2S Leave " << channel << endl;
+
+	map<string,struct channel_members>::iterator channel_iter;
+	channel_iter = channels.find(channel);
+
+	if (channel_iter != channels.end()) {
+		// iterator for map from server id to socket
+		map<string, struct sockaddr_in>::iterator it = channel_iter->second.channel_servers.find(key);
+		if (it != channel_iter->second.channel_servers.end()) {
+			// server id was found in list of servers for channel
+			channel_iter->second.channel_servers.erase(it);
+		} else {
+			cout << "server id not found in channel " << channel << endl;
+		}
+	} else {
+		cout << "channel " << channel << " not found" << endl;
+	}
+}
+
+void on_alarm(int signum)
+{
+	timer_flag = 1;
+}
+
+void handle_timer()
+{
+	renew_subscriptions();
+	if (is_second_timer == 1) {
+		check_subscription_states();
+		is_second_timer = 0;
+	} else {
+		is_second_timer = 1;
+	}
+}
+
+void renew_subscriptions()
+{
+	cout << "renewing subscriptions..." << endl;
+	// create iterator for adjacent servers to send join to
+	map<string, struct sockaddr_in>::iterator server_iter;
+
+	for (server_iter = servers.begin(); server_iter != servers.end(); server_iter++) {
+		// create iterator for channels this server is subscribed to
+		map<string, struct channel_members>::iterator channels_iter;
+		for (channels_iter = channels.begin(); channels_iter != channels.end(); channels_iter++) {
+			send_ss_join(server_iter->first, server_iter->second, channels_iter->first);
+		}
+	}
+
+
+}
+
+void check_subscription_states()
+{
+	cout << "cancelling old subscriptions..." << endl;
+	// iterate through active servers map, if active state is 0 then remove from all channels
+	map<string, int>::iterator active_iter;
+	for (active_iter = active_servers.begin(); active_iter != active_servers.end(); active_iter++) {
+		// remove inactive server from channels
+		if (active_iter->second == 0) {
+			remove_server_from_channels(active_iter->first);
+		}
+		// reset active state to 0
+		active_iter->second = 0;
+	}
+}
+
+void remove_server_from_channels(string key)
+{
+	// iterate through channels
+	map<string, struct channel_members>::iterator channels_iter;
+	for (channels_iter = channels.begin(); channels_iter != channels.end(); channels_iter++) {
+		// check if the channel contains the server key
+		if (channels_iter->second.channel_servers.find(key) != channels_iter->second.channel_servers.end()) {
+			cout << "removing " << key << " from channel " << channels_iter->first << endl;
+			server_leave_channel(key, channels_iter->first);
+		}
+	}
+}
